@@ -1,0 +1,4 @@
+*.pdf
+GC*.txt
+*.pickle
+env/*

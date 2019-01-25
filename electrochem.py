@@ -16,6 +16,68 @@ import os.path
 from math import pi, sqrt
 
 
+def plot_fits(fit_parameters, log_posteriors, filenames):
+    print('using starting points:')
+    for i, found_parameters in enumerate(fit_parameters):
+        print('\t', found_parameters)
+
+        plt.clf()
+        log_posterior = log_posteriors[i]
+        times = log_posterior._log_likelihood._problem._times
+        values = log_posterior._log_likelihood._problem._values
+        sim_values = log_posterior._log_likelihood._problem.evaluate(
+            found_parameters)
+        E_0, T_0, L_0, I_0 = model._calculate_characteristic_values()
+        dim_values = I_0*values*1e6
+        dim_sim_values = I_0*sim_values*1e6
+        plt.plot(T_0*times, dim_values, label='experiment')
+        plt.plot(T_0*times, dim_sim_values, label='simulation')
+        plt.xlabel(r'$t$ (s)')
+        plt.ylabel(r'$I_{tot}$ ($\mu A$)')
+        plt.legend()
+        filename = filenames[i]
+        print('plotting fit for ', filename)
+        plt.savefig('fit%s.pdf' % filename)
+
+        plt.clf()
+        residuals = dim_values - dim_sim_values
+        plt.plot(T_0*times, residuals, label='residuals')
+        plt.xlabel(r'$t$ (s)')
+        plt.ylabel(r'$I_{tot}-I{sim}$ ($\mu A$)')
+        print('plotting residual versus time for ', filename)
+        plt.savefig('residual_v_time_%s.pdf' % filename)
+
+        plt.clf()
+        plt.hist(residuals, bins=100)
+        plt.xlabel(r'$I_{tot}$ ($\mu A$)')
+        print('plotting residual histogram for ', filename)
+        plt.savefig('residual_histogram_%s.pdf' % filename)
+
+        plt.clf()
+        autocorr = np.correlate(residuals, residuals, mode='full')
+        autocorr = autocorr[autocorr.size//2:]
+        autocorr = autocorr[:400]/autocorr[0]
+        plt.plot(autocorr, label='autocorrelation of residuals')
+        plt.xlabel(r'index')
+        plt.ylabel(r'autocorrelation')
+        print('plotting residual autocorrelation for ', filename)
+        plt.savefig('residual_autocorrelation_%s.pdf' % filename)
+
+        plt.clf()
+        plt.plot(autocorr[:10], label='autocorrelation of residuals')
+        plt.xlabel(r'index')
+        plt.ylabel(r'autocorrelation')
+        print('plotting residual autocorrelation zoom for ', filename)
+        plt.savefig('residual_autocorrelation_zoom_%s.pdf' % filename)
+
+        plt.clf()
+        plt.scatter(residuals[:-1], residuals[1:], label='residuals')
+        plt.xlabel(r'$I_{tot}^{t-1}-I{sim}^{t-1}$ ($\mu A$)')
+        plt.ylabel(r'$I_{tot}^{t}-I{sim}^{t}$ ($\mu A$)')
+        print('plotting residual versus residual for ', filename)
+        plt.savefig('residual_v_residual_%s.pdf' % filename)
+
+
 class AR1LogLikelihood(pints.ProblemLogLikelihood):
     """
     Calculates a log-likelihood assuming AR1 noise model
@@ -74,19 +136,19 @@ DEFAULT = {
 
 filenames = ['GC01_FeIII-1mM_1M-KCl_02_009Hz.txt',
              'GC02_FeIII-1mM_1M-KCl_02a_009Hz.txt',
-             'GC03_FeIII-1mM_1M-KCl_02_009Hz.txt',
-             'GC04_FeIII-1mM_1M-KCl_02_009Hz.txt',
-             'GC05_FeIII-1mM_1M-KCl_02_009Hz.txt',
-             'GC06_FeIII-1mM_1M-KCl_02_009Hz.txt',
-             'GC07_FeIII-1mM_1M-KCl_02_009Hz.txt',
-             'GC08_FeIII-1mM_1M-KCl_02_009Hz.txt',
-             'GC09_FeIII-1mM_1M-KCl_02_009Hz.txt',
-             'GC10_FeIII-1mM_1M-KCl_02_009Hz.txt']
+             'GC03_FeIII-1mM_1M-KCl_02_009Hz.txt']
+#'GC04_FeIII-1mM_1M-KCl_02_009Hz.txt',
+#'GC05_FeIII-1mM_1M-KCl_02_009Hz.txt',
+#'GC06_FeIII-1mM_1M-KCl_02_009Hz.txt',
+#'GC07_FeIII-1mM_1M-KCl_02_009Hz.txt',
+#'GC08_FeIII-1mM_1M-KCl_02_009Hz.txt',
+#'GC09_FeIII-1mM_1M-KCl_02_009Hz.txt',
+#'GC10_FeIII-1mM_1M-KCl_02_009Hz.txt']
 
 model = electrochemistry.ECModel(DEFAULT)
 data0 = electrochemistry.ECTimeData(
-    filenames[0], model, ignore_begin_samples=5, ignore_end_samples=0,
-    samples_per_period=5000)
+    filenames[0], model, ignore_begin_samples=5, ignore_end_samples=0)
+#    samples_per_period=5000)
 max_current = np.max(data0.current)
 sim_current = model.simulate(data0.times)
 plt.plot(data0.times, data0.current, label='exp')
@@ -150,8 +212,8 @@ if not os.path.isfile(pickle_file):
     for i, filename in enumerate(filenames):
 
         data = electrochemistry.ECTimeData(
-            filename, model, ignore_begin_samples=5, ignore_end_samples=0,
-            samples_per_period=5000)
+            filename, model, ignore_begin_samples=5, ignore_end_samples=0)
+        # samples_per_period=5000)
 
         current = data.current
         times = data.times
@@ -193,62 +255,50 @@ if not os.path.isfile(pickle_file):
 else:
     fit_parameters = pickle.load(open(pickle_file, 'rb'))
 
-print('using starting points:')
-for i, found_parameters in enumerate(fit_parameters):
-    print('\t', found_parameters)
+plot_fits(fit_parameters, log_posteriors, filenames)
 
-    plt.clf()
-    log_posterior = log_posteriors[i]
-    times = log_posterior._log_likelihood._problem._times
-    values = log_posterior._log_likelihood._problem._values
-    sim_values = log_posterior._log_likelihood._problem.evaluate(
-        found_parameters)
-    E_0, T_0, L_0, I_0 = model._calculate_characteristic_values()
-    dim_values = I_0*values*1e6
-    dim_sim_values = I_0*sim_values*1e6
-    plt.plot(T_0*times, dim_values, label='experiment')
-    plt.plot(T_0*times, dim_sim_values, label='simulation')
-    plt.xlabel(r'$t$ (s)')
-    plt.ylabel(r'$I_{tot}$ ($\mu A$)')
-    plt.legend()
-    filename = filenames[i]
-    print('plotting fit for ', filename)
-    plt.savefig('fit%s.pdf' % filename)
+pickle_file = 'all_chains.pickle'
+if not os.path.isfile(pickle_file):
+    all_chains = []
+    for i, log_posterior in enumerate(log_posteriors):
+        nchains = 5
+        xs = [
+            fit_parameters[i]*1.1,
+            fit_parameters[i]*1.05,
+            fit_parameters[i]*1.04,
+            fit_parameters[i]*0.95,
+            fit_parameters[i]*0.98,
+        ]
+        mcmc = pints.MCMCSampling(log_posterior, nchains, xs,
+                                  method=pints.AdaptiveCovarianceMCMC)
+        mcmc.set_parallel(True)
+        iters = 10000
+        mcmc.set_max_iterations(iters)
+        chains = mcmc.run()
+        # Run!
+        print('Running...')
+        chains = mcmc.run()
+        print('Done!')
+        all_chains.append(chains)
 
-    plt.clf()
-    residuals = dim_values - dim_sim_values
-    plt.plot(T_0*times, residuals, label='residuals')
-    plt.xlabel(r'$t$ (s)')
-    plt.ylabel(r'$I_{tot}-I{sim}$ ($\mu A$)')
-    print('plotting residual versus time for ', filename)
-    plt.savefig('residual_v_time_%s.pdf' % filename)
+    pickle.dump(all_chains, open(pickle_file, 'wb'))
+else:
+    all_chains = pickle.load(open(pickle_file, 'rb'))
 
-    plt.clf()
-    plt.hist(residuals, bins=100)
-    plt.xlabel(r'$I_{tot}$ ($\mu A$)')
-    print('plotting residual histogram for ', filename)
-    plt.savefig('residual_histogram_%s.pdf' % filename)
+chains = np.empty(
+    (len(all_chains)-1, all_chains[0].shape[1]//2, all_chains[0].shape[2]))
+print(all_chains[0].shape)
+for i, c in enumerate(all_chains[1:]):
+    chains[i, :, :] = c[0, c.shape[1]//2:, :]
 
-    plt.clf()
-    autocorr = np.correlate(residuals, residuals, mode='full')
-    autocorr = autocorr[autocorr.size//2:]
-    autocorr = autocorr[:400]/autocorr[0]
-    plt.plot(autocorr, label='autocorrelation of residuals')
-    plt.xlabel(r'index')
-    plt.ylabel(r'autocorrelation')
-    print('plotting residual autocorrelation for ', filename)
-    plt.savefig('residual_autocorrelation_%s.pdf' % filename)
+pints.plot.trace(chains)
+plt.savefig('trace_all.pdf')
 
-    plt.clf()
-    plt.plot(autocorr[:10], label='autocorrelation of residuals')
-    plt.xlabel(r'index')
-    plt.ylabel(r'autocorrelation')
-    print('plotting residual autocorrelation zoom for ', filename)
-    plt.savefig('residual_autocorrelation_zoom_%s.pdf' % filename)
-
-    plt.clf()
-    plt.scatter(residuals[:-1], residuals[1:], label='residuals')
-    plt.xlabel(r'$I_{tot}^{t-1}-I{sim}^{t-1}$ ($\mu A$)')
-    plt.ylabel(r'$I_{tot}^{t}-I{sim}^{t}$ ($\mu A$)')
-    print('plotting residual versus residual for ', filename)
-    plt.savefig('residual_v_residual_%s.pdf' % filename)
+# for i, chains in enumerate(all_chains):
+#    chains = chains[:, chains.shape[1]//2:, :]
+#
+#    pints.plot.trace(chains)
+#    print('R-hat:')
+#    print(pints.rhat_all_params(chains))
+#
+#    plt.savefig('trace_%s.pdf' % filenames[i])
