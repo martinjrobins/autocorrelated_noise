@@ -7,16 +7,14 @@ import numpy as np
 import matplotlib as mpl
 mpl.use('Agg')
 import matplotlib.pyplot as plt
-import matplotlib.ticker as mtick
 import scipy
 import scipy.stats
-from scipy.stats import invwishart
 import pickle
 import os.path
 from math import pi, sqrt
 
 
-def plot_fits(fit_parameters, log_posteriors, filenames):
+def plot_fits(fit_parameters, log_posteriors, filenames, ext):
     print('using starting points:')
     for i, found_parameters in enumerate(fit_parameters):
         print('\t', found_parameters)
@@ -37,21 +35,22 @@ def plot_fits(fit_parameters, log_posteriors, filenames):
         plt.legend()
         filename = filenames[i]
         print('plotting fit for ', filename)
-        plt.savefig('fit%s.pdf' % filename)
+        plt.savefig(ext + 'fit%s.pdf' % filename)
 
         plt.clf()
         residuals = dim_values - dim_sim_values
+        np.savetxt(ext + 'residuals_v_time_{}.csv'.format(filename), (times,residuals))
         plt.plot(T_0*times, residuals, label='residuals')
         plt.xlabel(r'$t$ (s)')
         plt.ylabel(r'$I_{tot}-I{sim}$ ($\mu A$)')
         print('plotting residual versus time for ', filename)
-        plt.savefig('residual_v_time_%s.pdf' % filename)
+        plt.savefig(ext + 'residual_v_time_%s.pdf' % filename)
 
         plt.clf()
         plt.hist(residuals, bins=100)
         plt.xlabel(r'$I_{tot}$ ($\mu A$)')
         print('plotting residual histogram for ', filename)
-        plt.savefig('residual_histogram_%s.pdf' % filename)
+        plt.savefig(ext + 'residual_histogram_%s.pdf' % filename)
 
         plt.clf()
         autocorr = np.correlate(residuals, residuals, mode='full')
@@ -61,57 +60,22 @@ def plot_fits(fit_parameters, log_posteriors, filenames):
         plt.xlabel(r'index')
         plt.ylabel(r'autocorrelation')
         print('plotting residual autocorrelation for ', filename)
-        plt.savefig('residual_autocorrelation_%s.pdf' % filename)
+        plt.savefig(ext + 'residual_autocorrelation_%s.pdf' % filename)
 
         plt.clf()
         plt.plot(autocorr[:10], label='autocorrelation of residuals')
         plt.xlabel(r'index')
         plt.ylabel(r'autocorrelation')
         print('plotting residual autocorrelation zoom for ', filename)
-        plt.savefig('residual_autocorrelation_zoom_%s.pdf' % filename)
+        plt.savefig(ext + 'residual_autocorrelation_zoom_%s.pdf' % filename)
 
         plt.clf()
         plt.scatter(residuals[:-1], residuals[1:], label='residuals')
         plt.xlabel(r'$I_{tot}^{t-1}-I{sim}^{t-1}$ ($\mu A$)')
         plt.ylabel(r'$I_{tot}^{t}-I{sim}^{t}$ ($\mu A$)')
         print('plotting residual versus residual for ', filename)
-        plt.savefig('residual_v_residual_%s.pdf' % filename)
+        plt.savefig(ext + 'residual_v_residual_%s.pdf' % filename)
 
-
-class AR1LogLikelihood(pints.ProblemLogLikelihood):
-    """
-    Calculates a log-likelihood assuming AR1 noise model
-
-    Arguments:
-
-    ``problem``
-        A :class:`SingleOutputProblem` or :class:`MultiOutputProblem`. For a
-        single-output problem a single parameter is added, for a multi-output
-        problem ``n_outputs`` parameters are added.
-
-    *Extends:* :class:`ProblemLogLikelihood`
-    """
-
-    def __init__(self, problem):
-        super(AR1LogLikelihood, self).__init__(problem)
-
-        # Get number of times, number of outputs
-        self._nt = len(self._times)-1
-        self._no = problem.n_outputs()
-
-        # Add parameters to problem
-        self._n_parameters = problem.n_parameters() + 2*self._no
-
-        # Pre-calculate parts
-        self._logn = 0.5 * (self._nt) * np.log(2 * np.pi)
-
-    def __call__(self, x):
-        sigma = np.asarray(x[-2*self._no:-self._no])
-        rho = np.asarray(x[-self._no:])
-        error = self._values - self._problem.evaluate(x[:-self._no])
-        autocorr_error = error[1:] - rho*error[:-1]
-        return np.sum(- self._logn - self._nt * np.log(sigma)
-                      - np.sum(autocorr_error**2, axis=0) / (2 * sigma**2))
 
 
 DEFAULT = {
@@ -147,8 +111,7 @@ filenames = ['GC01_FeIII-1mM_1M-KCl_02_009Hz.txt',
 
 model = electrochemistry.ECModel(DEFAULT)
 data0 = electrochemistry.ECTimeData(
-    filenames[0], model, ignore_begin_samples=5, ignore_end_samples=0)
-#    samples_per_period=5000)
+    filenames[0], model, ignore_begin_samples=5, ignore_end_samples=0, samples_per_period=5000)
 max_current = np.max(data0.current)
 sim_current = model.simulate(data0.times)
 plt.plot(data0.times, data0.current, label='exp')
@@ -157,7 +120,7 @@ plt.legend()
 plt.savefig('default.pdf')
 max_k0 = model.non_dimensionalise(1000, 'k0')
 e0_buffer = 0.1 * (model.params['Ereverse'] - model.params['Estart'])
-names = ['k0', 'E0', 'Cdl', 'Ru', 'alpha']
+names = ['k0', 'E0', 'Cdl', 'Ru', 'alpha', 'omega']
 true = [model.params[name] for name in names]
 
 lower_bounds = [
@@ -166,18 +129,15 @@ lower_bounds = [
     0.0,
     0.0,
     0.4,
-    0.001 * max_current,
-    0.0,
+    0.9* model.params['omega'],
 ]
-
 upper_bounds = [
     100 * model.params['k0'],
     model.params['Ereverse'] - e0_buffer,
     10 * model.params['Cdl'],
     10 * model.params['Ru'],
     0.6,
-    0.03 * max_current,
-    1.0,
+    1.1* model.params['omega'],
 ]
 
 print('lower true upper')
@@ -200,20 +160,18 @@ plt.savefig('default_pints.pdf')
 nexp = len(filenames)
 
 # cmaes params
-x0 = np.array([0.5 * (u + l) for l, u in zip(lower_bounds, upper_bounds)])
-sigma0 = [0.5 * (h - l) for l, h in zip(lower_bounds, upper_bounds)]
 
 # parameters = np.zeros((samples,len(mean)))
 # values = np.zeros((samples,len(times)))
 
-log_posteriors = []
+log_posteriors_ar1 = []
+log_posteriors_iid = []
 pickle_file = 'log_posteriors.pickle'
 if not os.path.isfile(pickle_file):
     for i, filename in enumerate(filenames):
 
         data = electrochemistry.ECTimeData(
-            filename, model, ignore_begin_samples=5, ignore_end_samples=0)
-        # samples_per_period=5000)
+            filename, model, ignore_begin_samples=5, ignore_end_samples=0, samples_per_period=5000)
 
         current = data.current
         times = data.times
@@ -221,78 +179,93 @@ if not os.path.isfile(pickle_file):
         problem = pints.SingleOutputProblem(pints_model, times, current)
 
         # Create a new log-likelihood function
-        log_likelihood = AR1LogLikelihood(problem)
+        log_likelihood_ar1 = pints.AR1LogLikelihood(problem)
+        log_likelihood_iid = pints.GaussianLogLikelihood(problem)
 
         # Create a new prior
-        log_prior = pints.UniformLogPrior(lower_bounds, upper_bounds)
+        log_prior_ar1 = pints.UniformLogPrior(lower_bounds+[0,0.001*max_current],
+                upper_bounds+[1,0.03*max_current])
+        log_prior_iid = pints.UniformLogPrior(lower_bounds+[0.001*max_current],
+                upper_bounds+[0.03*max_current])
 
         # Create a posterior log-likelihood (log(likelihood * prior))
-        log_posterior = pints.LogPosterior(log_likelihood, log_prior)
-        log_posteriors.append(log_posterior)
-    pickle.dump(log_posteriors, open(pickle_file, 'wb'))
+        log_posterior_ar1 = pints.LogPosterior(log_likelihood_ar1, log_prior_ar1)
+        log_posterior_iid = pints.LogPosterior(log_likelihood_iid, log_prior_iid)
+        log_posteriors_ar1.append(log_posterior_ar1)
+        log_posteriors_iid.append(log_posterior_iid)
+    pickle.dump((log_posteriors_ar1,log_posteriors_iid), open(pickle_file, 'wb'))
 else:
-    log_posteriors = pickle.load(open(pickle_file, 'rb'))
+    log_posteriors_ar1, log_posteriors_iid = pickle.load(open(pickle_file, 'rb'))
 
 
 pickle_file = 'fit_parameters.pickle'
 if not os.path.isfile(pickle_file):
-    fit_parameters = []
-    for i, filename in enumerate(filenames):
-        log_posterior = log_posteriors[i]
-        score = pints.ProbabilityBasedError(log_posterior)
-        boundaries = pints.RectangularBoundaries(lower_bounds, upper_bounds)
+    fit_parameters_ar1 = []
+    fit_parameters_iid = []
+    for log_posteriors,fit_parameters in zip([log_posteriors_ar1, log_posteriors_iid],
+                                            [fit_parameters_ar1, fit_parameters_iid]):
+        for i, filename in enumerate(filenames):
+            log_posterior = log_posteriors[i]
+            lower_bounds = log_posterior._log_prior._boundaries.lower()
+            upper_bounds = log_posterior._log_prior._boundaries.upper()
+            x0 = np.array([0.5 * (u + l) for l, u in zip(lower_bounds, upper_bounds)])
+            sigma0 = [0.5 * (h - l) for l, h in zip(lower_bounds, upper_bounds)]
+            score = pints.ProbabilityBasedError(log_posterior)
+            boundaries = pints.RectangularBoundaries(lower_bounds, upper_bounds)
 
-        found_parameters, found_value = pints.optimise(
-            score,
-            x0,
-            sigma0,
-            boundaries,
-            method=pints.CMAES
-        )
-        fit_parameters.append(found_parameters)
+            found_parameters, found_value = pints.optimise(
+                score,
+                x0,
+                sigma0,
+                boundaries,
+                method=pints.CMAES
+            )
+            fit_parameters.append(found_parameters)
 
-    pickle.dump(fit_parameters, open(pickle_file, 'wb'))
+    pickle.dump((fit_parameters_ar1, fit_parameters_iid), open(pickle_file, 'wb'))
 else:
-    fit_parameters = pickle.load(open(pickle_file, 'rb'))
+    fit_parameters_ar1,fit_parameters_iid = pickle.load(open(pickle_file, 'rb'))
 
-plot_fits(fit_parameters, log_posteriors, filenames)
+plot_fits(fit_parameters_ar1, log_posteriors_ar1, filenames, 'ar1')
+plot_fits(fit_parameters_iid, log_posteriors_iid, filenames, 'iid')
 
-pickle_file = 'all_chains.pickle'
-if not os.path.isfile(pickle_file):
-    all_chains = []
-    for i, log_posterior in enumerate(log_posteriors):
-        nchains = 5
-        xs = [
-            fit_parameters[i]*1.1,
-            fit_parameters[i]*1.05,
-            fit_parameters[i]*1.04,
-            fit_parameters[i]*0.95,
-            fit_parameters[i]*0.98,
-        ]
-        mcmc = pints.MCMCSampling(log_posterior, nchains, xs,
-                                  method=pints.AdaptiveCovarianceMCMC)
-        mcmc.set_parallel(True)
-        iters = 10000
-        mcmc.set_max_iterations(iters)
-        chains = mcmc.run()
-        # Run!
-        print('Running...')
-        chains = mcmc.run()
-        print('Done!')
-        all_chains.append(chains)
-
-    pickle.dump(all_chains, open(pickle_file, 'wb'))
-else:
-    all_chains = pickle.load(open(pickle_file, 'rb'))
-
-chains = np.empty(
-    (len(all_chains)-1, all_chains[0].shape[1]//2, all_chains[0].shape[2]))
-print(all_chains[0].shape)
-for i, c in enumerate(all_chains[1:]):
-    chains[i, :, :] = c[0, c.shape[1]//2:, :]
-
-pints.plot.trace(chains)
-plt.savefig('trace_all.pdf')
+#pickle_file = 'all_chains.pickle'
+#if not os.path.isfile(pickle_file):
+#    all_chains = []
+#    for i, log_posterior in enumerate(log_posteriors):
+#        nchains = 5
+#        xs = [
+#            fit_parameters[i]*1.1,
+#            fit_parameters[i]*1.05,
+#            fit_parameters[i]*1.04,
+#            fit_parameters[i]*0.95,
+#            fit_parameters[i]*0.98,
+#        ]
+#        print(xs)
+#        mcmc = pints.MCMCController(log_posterior, nchains, xs,
+#                                  method=pints.HaarioBardenetACMC)
+#        mcmc.set_parallel(True)
+#        iters = 10000
+#        mcmc.set_max_iterations(iters)
+#        chains = mcmc.run()
+#        # Run!
+#        print('Running...')
+#        chains = mcmc.run()
+#        print('Done!')
+#        all_chains.append(chains)
+#
+#    pickle.dump(all_chains, open(pickle_file, 'wb'))
+#else:
+#    all_chains = pickle.load(open(pickle_file, 'rb'))
+#
+#chains = np.empty(
+#    (len(all_chains)-1, all_chains[0].shape[1]//2, all_chains[0].shape[2]))
+#print(all_chains[0].shape)
+#for i, c in enumerate(all_chains[1:]):
+#    chains[i, :, :] = c[0, c.shape[1]//2:, :]
+#
+#pints.plot.trace(chains)
+#plt.savefig('trace_all.pdf')
 
 # for i, chains in enumerate(all_chains):
 #    chains = chains[:, chains.shape[1]//2:, :]
