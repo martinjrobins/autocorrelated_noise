@@ -1,0 +1,4 @@
+git+git://github.com/pints-team/pints@master#egg=pints
+git+git://github.com/pints-team/electrochemistry@master#egg=electrochemistry
+matplotlib
+numpy
